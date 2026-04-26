@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+from src.portfolio.manager import PortfolioManager
+from src.portfolio.optimizer import RiskParityOptimizer
 
 
 def test_allocate_equal():
