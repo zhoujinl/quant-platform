@@ -15,14 +15,15 @@ from src.data.fetcher import StockFetcher
 
 
 st.set_page_config(page_title="A股回测平台", layout="wide")
-
+st.markdown("")  # 占位，避免侧边栏遮挡
 st.title("A股回测平台")
 
 
 def calculate_performance_metrics(result) -> pd.DataFrame:
-    equity = result.equity_curve
-    if equity.empty:
+    if result is None or result.equity_curve is None or result.equity_curve.empty:
         return pd.DataFrame()
+    
+    equity = result.equity_curve
     
     total_return = (result.final_value - result.initial_capital) / result.initial_capital * 100
     days = (equity.index[-1] - equity.index[0]).days
@@ -144,27 +145,41 @@ with tab1:
                 initial_capital, max_positions, commission
             )
         
-        st.success("回测完成!")
+        if result is None:
+            st.error("获取数据失败，请检查网络连接或稍后重试")
+        else:
+            st.success("回测完成!")
+            fetcher = StockFetcher()
+            
+            st.subheader("绩效指标")
+            metrics = calculate_performance_metrics(result)
+            st.table(metrics)
         
-        st.subheader("绩效指标")
-        metrics = calculate_performance_metrics(result)
-        st.table(metrics)
-        
-        st.subheader("权益曲线")
-        if not result.equity_curve.empty:
-            df = result.equity_curve.reset_index()
-            fig = px.line(df, x='date', y='value', 
-                        title='账户权益曲线', labels={'value': '账户价值'})
-            st.plotly_chart(fig, use_container_width=True)
-        
-        if result.trades:
-            with st.expander("交易记录"):
-                trades_df = pd.DataFrame([
-                    {'日期': t.date, '股票': t.symbol, '操作': t.action, 
-                     '数量': t.quantity, '价格': t.price, '手续费': t.commission}
-                    for t in result.trades
-                ])
-                st.table(trades_df)
+            st.subheader("权益曲线")
+            if result.equity_curve is not None and not result.equity_curve.empty:
+                df = result.equity_curve.reset_index()
+                fig = px.line(df, x='date', y='value', 
+                            title='账户权益曲线', labels={'value': '账户价值'})
+                st.plotly_chart(fig, use_container_width=True)
+            
+            if result.trades:
+                with st.expander("交易记录"):
+                    # 获取股票名称
+                    unique_symbols = list(set([t.symbol for t in result.trades]))
+                    symbol_names = {}
+                    for sym in unique_symbols:
+                        try:
+                            symbol_names[sym] = fetcher.get_stock_name(sym)
+                        except Exception:
+                            symbol_names[sym] = sym
+                    
+                    trades_df = pd.DataFrame([
+                        {'日期': t.date, '股票': t.symbol, '名称': symbol_names.get(t.symbol, t.symbol),
+                         '操作': t.action, '数量': t.quantity, '价格': f"¥{t.price:.2f}", 
+                         '金额': f"¥{t.quantity * t.price:,.2f}", '手续费': f"¥{t.commission:.2f}"}
+                        for t in result.trades
+                    ])
+                    st.table(trades_df)
 
 with tab2:
     st.subheader("内置因子")

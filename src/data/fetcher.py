@@ -88,3 +88,21 @@ class StockFetcher:
             symbol: 股票代码，如 '600519.SH'
         """
         return ak.stock_individual_info_em(symbol=symbol)
+    
+    def get_stock_name(self, symbol: str) -> str:
+        """获取股票名称
+        
+        Args:
+            symbol: 股票代码，如 '600519.SH'
+        Returns:
+            股票名称
+        """
+        code = symbol.replace('.SH', '').replace('.SZ', '')
+        try:
+            info = ak.stock_individual_info_em(symbol=code)
+            name_row = info[info['item'] == '股票简称']
+            if not name_row.empty:
+                return name_row.iloc[0]['value']
+        except Exception:
+            pass
+        return symbol
