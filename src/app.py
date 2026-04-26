@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + '/..')
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,6 +11,7 @@ from datetime import datetime, timedelta
 from src.factors.registry import FACTOR_REGISTRY
 from src.signals.registry import get_signal
 from src.backtest.engine import BacktestEngine
+from src.data.fetcher import StockFetcher
 
 
 st.set_page_config(page_title="A股回测平台", layout="wide")
@@ -47,32 +52,57 @@ def calculate_performance_metrics(result) -> pd.DataFrame:
 
 
 def run_placeholder_backtest(start_date, end_date, pool, factor, signal_type, initial_capital, max_positions, commission):
+    """使用真实数据运行回测"""
+    fetcher = StockFetcher()
     dates = pd.date_range(start=start_date, end=end_date, freq='B')
     dates = [d for d in dates if d.weekday() < 5]
     
-    np.random.seed(42)
-    symbols = {'沪深300': ['SH600000', 'SH600016', 'SH600019', 'SH600028', 'SH600030'],
-              '中证500': ['SH600000', 'SH600015', 'SH600028', 'SH600030', 'SH600060'],
-              '自选': ['SH600000', 'SH600016', 'SH600028']}[pool]
+    # 获取股票池
+    if pool == '沪深300':
+        symbols = fetcher.get_hs300_symbols()
+    elif pool == '中证2000':
+        symbols = fetcher.get_cz2000_symbols()
+    else:
+        symbols = ['600000.SH', '600016.SH', '600028.SH', '600030.SH', '600060.SH']
     
+    # 限制数量以便快速测试
+    symbols = symbols[:100]
+    
+    # 获取各股票价格数据
     data = {}
-    for sym in symbols:
-        prices = 10 + np.random.randn(len(dates)).cumsum()
-        prices = np.maximum(prices, 5)
-        data[sym] = prices
+    for sym in symbols[:50]:  # 限制50只以便快速获取
+        try:
+            df = fetcher.get_stock_daily(sym, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+            if not df.empty:
+                data[sym] = df['close']
+        except Exception as e:
+            continue
     
-    prices_df = pd.DataFrame(data, index=dates)
+    if not data:
+        return None
+    
+    prices_df = pd.DataFrame(data)
     prices_df.index.name = 'date'
     
+    # 每月调仓
     signals = {}
-    for i, date in enumerate(dates):
-        if i % 5 == 0:
+    rebalance_dates = pd.date_range(start=start_date, end=end_date, freq='ME')  # 月末
+    for date in rebalance_dates:
+        if date in prices_df.index:
             date_str = date.strftime('%Y-%m-%d')
             signals[date_str] = {}
-            n = min(max_positions, len(symbols))
-            selected = np.random.choice(symbols, n, replace=False)
-            for sym in selected:
-                signals[date_str][sym] = 100
+            
+            # 获取当日因子值 (简化为收盘价排序)
+            day_data = prices_df.loc[:date].iloc[-1] if not prices_df.loc[:date].empty else prices_df.iloc[-1]
+            # 选最低价的几只 (模拟低估策略)
+            selected = day_data.nsmallest(min(max_positions, 30))
+            for sym in selected.index:
+                # 按等权分配股数
+                price = day_data[sym]
+                if price > 0:
+                    shares = int((initial_capital / max_positions) / price)
+                    if shares > 0:
+                        signals[date_str][sym] = shares
     
     engine = BacktestEngine(initial_capital=initial_capital, commission=commission)
     engine.run(prices_df, signals)
@@ -95,13 +125,13 @@ with tab1:
     with col2:
         signal_type = st.selectbox("信号类型", ["top_n", "threshold", "composite"])
     with col3:
-        pool = st.selectbox("股票池", ["沪深300", "中证500", "自选"])
+        pool = st.selectbox("股票池", ["沪深300", "中证2000", "自选"])
     with col4:
         n_select = st.number_input("选股数量", value=5, step=1, min_value=1)
     
     col5, col6 = st.columns(2)
     with col5:
-        start_date = st.date_input("开始日期", value=datetime.today() - timedelta(days=365))
+        start_date = st.date_input("开始日期", value=datetime.today() - timedelta(days=365*5))
     with col6:
         end_date = st.date_input("结束日期", value=datetime.today())
     
@@ -122,8 +152,9 @@ with tab1:
         
         st.subheader("权益曲线")
         if not result.equity_curve.empty:
-            fig = px.line(result.equity_curve, x='date', y='value', 
-                         title='账户权益曲线', labels={'value': '账户价值'})
+            df = result.equity_curve.reset_index()
+            fig = px.line(df, x='date', y='value', 
+                        title='账户权益曲线', labels={'value': '账户价值'})
             st.plotly_chart(fig, use_container_width=True)
         
         if result.trades:

@@ -1,5 +1,6 @@
 import akshare as ak
 import pandas as pd
+from datetime import datetime, timedelta
 from typing import Optional
 
 
@@ -27,6 +28,34 @@ class StockFetcher:
         df = df[(df['date'] >= start) & (df['date'] <= end)]
         df = df.set_index('date').sort_index()
         return df
+    
+    def get_index_components(self, symbol: str) -> list:
+        """获取指数成分股
+        
+        Args:
+            symbol: '000300' (沪深300), '000852' (中证2000)
+        Returns:
+            股票代码列表，如 ['600000.SH', '000001.SZ']
+        """
+        df = ak.index_stock_cons_csindex(symbol=symbol)
+        # 根据交易所添加后缀
+        stocks = []
+        for _, row in df.iterrows():
+            code = row['成分券代码']
+            exchange = row['交易所']
+            if exchange == '上海证券交易所':
+                stocks.append(f'{code}.SH')
+            else:
+                stocks.append(f'{code}.SZ')
+        return stocks
+    
+    def get_hs300_symbols(self) -> list:
+        """获取沪深300成分股"""
+        return self.get_index_components('000300')
+    
+    def get_cz2000_symbols(self) -> list:
+        """获取中证2000成分股"""
+        return self.get_index_components('000852')
     
     def get_stock_daily(self, symbol: str, start: str, end: str) -> pd.DataFrame:
         """获取个股日线
